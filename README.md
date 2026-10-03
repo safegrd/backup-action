@@ -230,8 +230,9 @@ surfaces:
 
 With `from: safegrd`, SafeGrd holds the mailbox's password, encrypted, and
 gives it only to this host when it backs up. The workflow needs no secret for
-it. Run the workflow once so the surface appears in the console, then hand the
-password over under **Nodes**, **Credential**.
+it. The first run registers the surface with SafeGrd and fails, because
+SafeGrd holds no password for it yet. Hand the password over in the console
+under **Nodes**, **Credential**, and the next run backs the mailbox up.
 
 To keep the password in GitHub instead, name a variable in the config and set
 it on the step:
