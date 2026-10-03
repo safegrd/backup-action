@@ -11,7 +11,7 @@ It suits a database with no server of your own beside it, such as Supabase or
 another managed database: the runner is the host.
 
 ```yaml
-- uses: safegrd/backup-action@v1
+- uses: safegrd/backup-action@v0
   with:
     config: ${{ secrets.SAFEGRD_CONFIG }}
     database-url: ${{ secrets.DATABASE_URL }}
@@ -76,7 +76,7 @@ jobs:
     if: github.event.schedule != '47 4 * * 1'
     runs-on: ubuntu-24.04
     steps:
-      - uses: safegrd/backup-action@v1
+      - uses: safegrd/backup-action@v0
         with:
           config: ${{ secrets.SAFEGRD_CONFIG }}
           database-url: ${{ secrets.DATABASE_URL }}
@@ -95,7 +95,7 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 24
     steps:
-      - uses: safegrd/backup-action@v1
+      - uses: safegrd/backup-action@v0
         with:
           config: ${{ secrets.SAFEGRD_CONFIG }}
           database-url: ${{ secrets.DATABASE_URL }}
@@ -153,7 +153,7 @@ MariaDB:
           --health-cmd "mysqladmin ping -h 127.0.0.1 -psandbox" --health-interval 5s
           --health-timeout 5s --health-retries 24
     steps:
-      - uses: safegrd/backup-action@v1
+      - uses: safegrd/backup-action@v0
         with:
           config: ${{ secrets.SAFEGRD_CONFIG }}
           database-url: ${{ secrets.DATABASE_URL }}
@@ -174,7 +174,7 @@ to restore into:
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
           --health-interval 5s --health-timeout 5s --health-retries 24
     steps:
-      - uses: safegrd/backup-action@v1
+      - uses: safegrd/backup-action@v0
         with:
           config: ${{ secrets.SAFEGRD_CONFIG }}
           database-url: ${{ secrets.DATABASE_URL }}
@@ -201,7 +201,7 @@ surfaces:
 ```yaml
     steps:
       - uses: actions/checkout@v4
-      - uses: safegrd/backup-action@v1
+      - uses: safegrd/backup-action@v0
         with:
           config: ${{ secrets.SAFEGRD_CONFIG }}
           surface: uploads
@@ -242,7 +242,7 @@ it on the step:
 ```
 
 ```yaml
-      - uses: safegrd/backup-action@v1
+      - uses: safegrd/backup-action@v0
         env:
           SUPPORT_IMAP_PASSWORD: ${{ secrets.SUPPORT_IMAP_PASSWORD }}
         with:
@@ -310,5 +310,6 @@ sent again later.
 
 ## Versions
 
-`@v1` moves to each compatible release of this action. To pin exactly, use a
-commit SHA. `version` pins the SafeGrd CLI separately.
+`@v0` moves to each release of this action while its inputs may still change.
+`@v1` will follow once they are fixed. To pin exactly, use a commit SHA.
+`version` pins the SafeGrd CLI separately.
