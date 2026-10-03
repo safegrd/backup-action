@@ -1,12 +1,14 @@
 # SafeGrd Backup action
 
-Backs up a PostgreSQL database from a GitHub Actions runner with
-[SafeGrd](https://safegrd.dev), and restores the backup to test it. The dump is
-encrypted on the runner before it is uploaded, and the backup and every drill
-are reported to SafeGrd, where the console shows them.
+Backs up a database, a folder or a mailbox from a GitHub Actions runner with
+[SafeGrd](https://safegrd.dev), and restores the backup to test it. It backs up
+PostgreSQL, MySQL, MariaDB, MongoDB and SQLite databases, and the folders and
+mailboxes a SafeGrd config describes. The backup is encrypted on the runner
+before it is uploaded, and the backup and every drill are reported to SafeGrd,
+where the console shows them.
 
 It suits a database with no server of your own beside it, such as Supabase or
-another managed Postgres: the runner is the host.
+another managed database: the runner is the host.
 
 ```yaml
 - uses: safegrd/backup-action@v1
@@ -48,6 +50,9 @@ another managed Postgres: the runner is the host.
    gh secret set DATABASE_URL            # asks for the connection string
    gh secret set SAFEGRD_PRIVATE_KEY < keys/daemon.key   # only with --key-custody local
    ```
+
+   To back up a folder or a mailbox, add its surface to `safegrd.yaml` first
+   ([below](#folders-and-mailboxes)).
 
 3. **Add a workflow** (below), and run it once from the **Actions** tab.
 
@@ -114,16 +119,152 @@ to your plan.
 For Supabase, see the [Supabase guide](https://safegrd.dev/guides/supabase-backup-github-actions):
 its sandbox runs Supabase's own image.
 
+## MySQL, MariaDB, MongoDB and SQLite
+
+`database-url` picks the engine by its scheme, as the CLI does:
+
+| Scheme | Engine | Dump tool | Sandbox |
+| :-- | :-- | :-- | :-- |
+| `postgres://`, `postgresql://` | PostgreSQL | `pg_dump`, `postgres-version` or newer | a PostgreSQL database, created if missing |
+| `mysql://`, `mariadb://` | MySQL or MariaDB | `mysqldump` or `mariadb-dump` | a MySQL or MariaDB database, created if missing |
+| `mongodb://`, `mongodb+srv://` | MongoDB | `mongodump` and `mongorestore` | a MongoDB database, created by the drill |
+| `sqlite:` | SQLite | none | a path to a file that does not exist yet |
+
+When the runner has no dump tool for the engine, the action installs one:
+`mysql-client` from the runner's apt sources (`mariadb-client` for a
+`mariadb://` URL), or `mongodb-database-tools` from MongoDB's signed apt
+repository. Any version will do, as for the CLI. On a runner without
+`apt-get`, install the tool in an earlier step; the action finds it on `PATH`.
+
+A drill job for MySQL. Use the image your server runs, `mariadb:11.4` for
+MariaDB:
+
+```yaml
+  drill:
+    runs-on: ubuntu-24.04
+    services:
+      sandbox:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: sandbox
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -psandbox" --health-interval 5s
+          --health-timeout 5s --health-retries 24
+    steps:
+      - uses: safegrd/backup-action@v1
+        with:
+          config: ${{ secrets.SAFEGRD_CONFIG }}
+          database-url: ${{ secrets.DATABASE_URL }}
+          drill: true
+          sandbox-url: mysql://root:sandbox@127.0.0.1:3306/drill
+```
+
+For MongoDB, the sandbox is a `mongo` service and the URL names the database
+to restore into:
+
+```yaml
+    services:
+      sandbox:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s --health-timeout 5s --health-retries 24
+    steps:
+      - uses: safegrd/backup-action@v1
+        with:
+          config: ${{ secrets.SAFEGRD_CONFIG }}
+          database-url: ${{ secrets.DATABASE_URL }}
+          drill: true
+          sandbox-url: mongodb://127.0.0.1:27017/drill
+```
+
+## Folders and mailboxes
+
+`surface` backs up one surface of the config, the way `safegrd backup
+--surface` does on a host. Set `surface` or `database-url`, not both. Add the
+surface to `safegrd.yaml` before you store it as the `SAFEGRD_CONFIG` secret.
+
+A folder of the repository, or a volume a self-hosted runner mounts:
+
+```yaml
+surfaces:
+  - id: uploads
+    type: files
+    format: tar
+    roots: [uploads]
+```
+
+```yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: safegrd/backup-action@v1
+        with:
+          config: ${{ secrets.SAFEGRD_CONFIG }}
+          surface: uploads
+          drill: true
+```
+
+`roots` are paths on the runner. A relative root is read from the workspace,
+where `actions/checkout` puts the repository.
+
+On a GitHub-hosted runner, each job starts with no SafeGrd state. A
+`format: repo` surface keeps the list of what it uploaded in that state, so
+there it uploads every file on every run, as `format: tar` does. Use `tar` on
+GitHub-hosted runners, and `repo` on a self-hosted runner that keeps
+`~/.safegrd` between jobs.
+
+A mailbox:
+
+```yaml
+surfaces:
+  - id: support-inbox
+    type: email
+    host: imap.example.com
+    username: support@example.com
+    credential: {from: safegrd}
+```
+
+With `from: safegrd`, SafeGrd holds the mailbox's password, encrypted, and
+gives it only to this host when it backs up. The workflow needs no secret for
+it. Run the workflow once so the surface appears in the console, then hand the
+password over under **Nodes**, **Credential**.
+
+To keep the password in GitHub instead, name a variable in the config and set
+it on the step:
+
+```yaml
+    credential: {from: env, name: SUPPORT_IMAP_PASSWORD}
+```
+
+```yaml
+      - uses: safegrd/backup-action@v1
+        env:
+          SUPPORT_IMAP_PASSWORD: ${{ secrets.SUPPORT_IMAP_PASSWORD }}
+        with:
+          config: ${{ secrets.SAFEGRD_CONFIG }}
+          surface: support-inbox
+```
+
+A folder or a mailbox has no sandbox. With `drill: true`, its drill reads the
+whole snapshot back on the runner and checks every file or message against
+the manifest written at backup time. Leave out `sandbox-url`; the action
+refuses it before backing up.
+
 ## Inputs
 
 | Input | Default | What it is |
 | :-- | :-- | :-- |
 | `config` | required | The host's config file, written by `safegrd enroll --config`. Pass it from a secret. |
 | `database-url` | the config's | Connection string of the database to back up. Pass it from a secret. |
+| `surface` | none | ID of a surface in the config to back up instead: a folder, a mailbox or a database. |
 | `drill` | `false` | `true` restores the new backup and checks it. |
-| `sandbox-url` | none | With `drill: true`, an empty PostgreSQL database to restore into. Without it, the drill restores in memory. |
+| `sandbox-url` | none | With `drill: true`, an empty database of the same engine to restore into. Without it, the drill restores in memory. |
 | `private-key` | none | The Age identity, for a key you hold. Only the drill uses it. |
-| `postgres-version` | `17` | Major version of the server you back up. `none` uses the runner's own client. |
+| `postgres-version` | `17` | For PostgreSQL, the major version of the server. `none` uses the runner's own client. |
 | `version` | `latest` | SafeGrd CLI release to install, such as `v0.0.4`. |
 
 ## Outputs
@@ -134,31 +275,37 @@ its sandbox runs Supabase's own image.
 
 ## What it does
 
-1. **Install the PostgreSQL client.** `pg_dump` must be the server's major
-   version or newer. When the runner has none that new, the action installs
-   `postgresql-client-<postgres-version>` from apt.postgresql.org. That needs a
-   Linux runner with `apt-get`; elsewhere, install the client in an earlier
-   step and set `postgres-version: none`.
-2. **Install SafeGrd** from the [safegrd/cli](https://github.com/safegrd/cli/releases)
+1. **Install SafeGrd** from the [safegrd/cli](https://github.com/safegrd/cli/releases)
    release, after checking the archive against the release's `checksums.txt`.
    A release with no checksum for the archive is refused. `latest` asks the
    GitHub API with the job's token.
-3. **Write the config** to `$RUNNER_TEMP/safegrd/safegrd.yaml`, readable only by
+2. **Write the config** to `$RUNNER_TEMP/safegrd/safegrd.yaml`, readable only by
    the job's user. The runner empties `$RUNNER_TEMP` when the job ends.
-4. **Back up** with `safegrd backup`, and set `snapshot-id`.
+3. **Install the database client** the backup needs, read from the surface's
+   type or the URL's scheme. Inputs that cannot work together, such as a
+   `sandbox-url` of another engine, fail here, before anything is backed up.
+   For PostgreSQL, `pg_dump` must be the server's major version or newer. When
+   the runner has none that new, the action installs
+   `postgresql-client-<postgres-version>` from apt.postgresql.org. That needs a
+   Linux runner with `apt-get`; elsewhere, install the client in an earlier
+   step and set `postgres-version: none`.
+4. **Back up** with `safegrd backup`, or `safegrd backup --surface`, and set
+   `snapshot-id`.
 5. **Drill**, with `drill: true`: `safegrd verify` restores that snapshot into
-   `sandbox-url`, or in memory. When `sandbox-url` names a database that does
-   not exist yet, the action creates it first, connecting to the same server's
-   `postgres` database, and waits up to 60 seconds for the server to accept
-   connections.
+   `sandbox-url`, or in memory. When `sandbox-url` names a PostgreSQL, MySQL or
+   MariaDB database that does not exist yet, the action creates it first and
+   waits up to 60 seconds for the server to accept connections.
 
-`database-url` and `private-key` reach the CLI through the environment, not the
-command line, and the action prints neither. `sandbox-url` is passed on the
-command line, because it names a database that exists for one job.
+`database-url`, `private-key` and a password set on the step's `env` reach
+the CLI through the environment, not the command line, and the action prints
+none of them. `sandbox-url` is passed on the command line, because it names a database
+that exists for one job; the action gives its password to the MySQL client in
+a file only the job's user can read.
 
 A backup or drill that worked but that the remote server did not record is
 shown as a warning on the run, with the reason in the log. The console will not
-show that run.
+show that run. The runner keeps nothing after the job, so the record is not
+sent again later.
 
 ## Versions
 

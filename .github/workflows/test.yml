@@ -1,9 +1,13 @@
 name: Test
 
-# Runs the action from this checkout against a real Postgres, with a host set
-# up by `safegrd init`: local storage and no remote server, so it needs no
-# account and no secrets. It backs up, drills into a sandbox database the
-# action creates, then drills again in memory with the key passed as an input.
+# Runs the action from this checkout with a host set up by `safegrd init`:
+# local storage and no remote server, so it needs no account and no secrets.
+# The PostgreSQL job backs up, drills into a sandbox database the action
+# creates, then drills again in memory with the key passed as an input. The
+# MySQL and MongoDB jobs back up and drill into a sandbox on the same server.
+# The files job backs up a folder of this checkout as a surface and drills it
+# in memory. A standalone host reports to no remote server, so each drill
+# shows a "not recorded" warning; that is expected.
 
 on:
   push:
@@ -99,3 +103,155 @@ jobs:
         run: |
           test -n "$FIRST" && test -n "$SECOND" && test "$FIRST" != "$SECOND" ||
             { echo "::error::snapshot-id was '$FIRST' then '$SECOND'."; exit 1; }
+
+  mysql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: mysql
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pmysql" --health-interval 5s
+          --health-timeout 5s --health-retries 24
+    env:
+      MYSQL_PWD: mysql
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Seed a database to back up
+        run: |
+          mysql -h 127.0.0.1 -u root -e "CREATE DATABASE app"
+          mysql -h 127.0.0.1 -u root app -e "
+            CREATE TABLE orders (id INT AUTO_INCREMENT PRIMARY KEY, total BIGINT NOT NULL);
+            INSERT INTO orders (total)
+              WITH RECURSIVE g (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM g WHERE n < 250) SELECT n FROM g;"
+
+      - name: Set up a standalone host
+        id: host
+        env:
+          SAFEGRD_VERSION: latest
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install-safegrd.sh
+          export PATH="$RUNNER_TEMP/safegrd-bin:$PATH"
+          dir="$RUNNER_TEMP/host"
+          safegrd init --config "$dir/safegrd.yaml" --storage local --local-path "$dir/storage" --node-name action-mysql
+          {
+            echo "config<<SAFEGRD_EOF"
+            cat "$dir/safegrd.yaml"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Back up and drill into a sandbox
+        uses: ./
+        with:
+          config: ${{ steps.host.outputs.config }}
+          database-url: mysql://root:mysql@127.0.0.1:3306/app
+          drill: true
+          sandbox-url: mysql://root:mysql@127.0.0.1:3306/drill
+
+      - name: Check the sandbox holds the rows
+        run: |
+          rows="$(mysql -h 127.0.0.1 -u root -N -B drill -e "SELECT COUNT(*) FROM orders")"
+          test "$rows" = "250" || { echo "::error::The sandbox holds $rows rows, not 250."; exit 1; }
+
+  mongodb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'" --health-interval 5s
+          --health-timeout 5s --health-retries 24
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Seed a database to back up
+        run: |
+          docker exec "${{ job.services.mongo.id }}" mongosh --quiet app \
+            --eval 'db.orders.insertMany(Array.from({ length: 250 }, (_, i) => ({ n: i + 1 })))'
+
+      - name: Set up a standalone host
+        id: host
+        env:
+          SAFEGRD_VERSION: latest
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install-safegrd.sh
+          export PATH="$RUNNER_TEMP/safegrd-bin:$PATH"
+          dir="$RUNNER_TEMP/host"
+          safegrd init --config "$dir/safegrd.yaml" --storage local --local-path "$dir/storage" --node-name action-mongodb
+          {
+            echo "config<<SAFEGRD_EOF"
+            cat "$dir/safegrd.yaml"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Back up and drill into a sandbox
+        uses: ./
+        with:
+          config: ${{ steps.host.outputs.config }}
+          database-url: mongodb://127.0.0.1:27017/app
+          drill: true
+          sandbox-url: mongodb://127.0.0.1:27017/drill
+
+      - name: Check the sandbox holds the documents
+        run: |
+          docs="$(docker exec "${{ job.services.mongo.id }}" mongosh --quiet drill --eval 'db.orders.countDocuments()')"
+          test "$docs" = "250" || { echo "::error::The sandbox holds $docs documents, not 250."; exit 1; }
+
+  files:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make a folder to back up
+        run: |
+          mkdir -p site/assets
+          for i in $(seq 1 40); do echo "page $i" >"site/page-$i.html"; done
+          head -c 100000 /dev/urandom >site/assets/blob.bin
+
+      - name: Set up a standalone host with a files surface
+        id: host
+        env:
+          SAFEGRD_VERSION: latest
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install-safegrd.sh
+          export PATH="$RUNNER_TEMP/safegrd-bin:$PATH"
+          dir="$RUNNER_TEMP/host"
+          safegrd init --config "$dir/safegrd.yaml" --storage local --local-path "$dir/storage" --node-name action-files
+          cat >>"$dir/safegrd.yaml" <<'EOF'
+          surfaces:
+            - id: site
+              type: files
+              format: tar
+              roots: [site]
+          EOF
+          {
+            echo "config<<SAFEGRD_EOF"
+            cat "$dir/safegrd.yaml"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Back up the folder and drill it
+        id: files
+        uses: ./
+        with:
+          config: ${{ steps.host.outputs.config }}
+          surface: site
+          drill: true
+
+      - name: Check the run took a snapshot
+        env:
+          SNAPSHOT: ${{ steps.files.outputs.snapshot-id }}
+        run: |
+          test -n "$SNAPSHOT" || { echo "::error::snapshot-id is empty."; exit 1; }
