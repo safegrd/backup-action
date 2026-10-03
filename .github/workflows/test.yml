@@ -8,12 +8,31 @@ name: Test
 # The files job backs up a folder of this checkout as a surface and drills it
 # in memory. A standalone host reports to no remote server, so each drill
 # shows a "not recorded" warning; that is expected.
+#
+# The CLI's release calls this workflow before it publishes anything, with the
+# archives it built as an artifact of its run: every job then installs those
+# instead of the latest release, through SAFEGRD_DOWNLOAD_BASE, so a CLI release
+# that breaks this action is never published.
 
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      cli-version:
+        description: The CLI release under test, such as v0.0.11. Empty tests the latest release.
+        type: string
+        default: ""
+      dist-artifact:
+        description: An artifact of the calling run holding that release's archives and checksums.txt.
+        type: string
+        default: ""
+      action-ref:
+        description: The ref of safegrd/backup-action whose action and scripts are tested.
+        type: string
+        default: v0
 
 permissions:
   contents: read
@@ -35,7 +54,22 @@ jobs:
       ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
       APP_URL: postgres://postgres:postgres@localhost:5432/app?sslmode=disable
     steps:
+      # Called from another repository, a checkout defaults to the caller's.
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.cli-version != '' && 'safegrd/backup-action' || github.repository }}
+          ref: ${{ inputs.cli-version != '' && inputs.action-ref || '' }}
+
+      - name: Fetch the CLI under test
+        if: inputs.dist-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.dist-artifact }}
+          path: ${{ runner.temp }}/safegrd-dist
+
+      - name: Install it instead of the published release
+        if: inputs.dist-artifact != ''
+        run: echo "SAFEGRD_DOWNLOAD_BASE=file://$RUNNER_TEMP/safegrd-dist" >>"$GITHUB_ENV"
 
       - name: Seed a database to back up
         run: |
@@ -46,7 +80,7 @@ jobs:
       - name: Set up a standalone host
         id: host
         env:
-          SAFEGRD_VERSION: latest
+          SAFEGRD_VERSION: ${{ inputs.cli-version || 'latest' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           ./scripts/install-safegrd.sh
@@ -63,6 +97,7 @@ jobs:
         id: sandbox
         uses: ./
         with:
+          version: ${{ inputs.cli-version || 'latest' }}
           config: ${{ steps.host.outputs.config }}
           database-url: ${{ env.APP_URL }}
           drill: true
@@ -90,6 +125,7 @@ jobs:
         id: memory
         uses: ./
         with:
+          version: ${{ inputs.cli-version || 'latest' }}
           config: ${{ steps.host.outputs.config }}
           database-url: ${{ env.APP_URL }}
           drill: true
@@ -120,7 +156,22 @@ jobs:
     env:
       MYSQL_PWD: mysql
     steps:
+      # Called from another repository, a checkout defaults to the caller's.
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.cli-version != '' && 'safegrd/backup-action' || github.repository }}
+          ref: ${{ inputs.cli-version != '' && inputs.action-ref || '' }}
+
+      - name: Fetch the CLI under test
+        if: inputs.dist-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.dist-artifact }}
+          path: ${{ runner.temp }}/safegrd-dist
+
+      - name: Install it instead of the published release
+        if: inputs.dist-artifact != ''
+        run: echo "SAFEGRD_DOWNLOAD_BASE=file://$RUNNER_TEMP/safegrd-dist" >>"$GITHUB_ENV"
 
       - name: Seed a database to back up
         run: |
@@ -133,7 +184,7 @@ jobs:
       - name: Set up a standalone host
         id: host
         env:
-          SAFEGRD_VERSION: latest
+          SAFEGRD_VERSION: ${{ inputs.cli-version || 'latest' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           ./scripts/install-safegrd.sh
@@ -149,6 +200,7 @@ jobs:
       - name: Back up and drill into a sandbox
         uses: ./
         with:
+          version: ${{ inputs.cli-version || 'latest' }}
           config: ${{ steps.host.outputs.config }}
           database-url: mysql://root:mysql@127.0.0.1:3306/app
           drill: true
@@ -171,7 +223,22 @@ jobs:
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'" --health-interval 5s
           --health-timeout 5s --health-retries 24
     steps:
+      # Called from another repository, a checkout defaults to the caller's.
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.cli-version != '' && 'safegrd/backup-action' || github.repository }}
+          ref: ${{ inputs.cli-version != '' && inputs.action-ref || '' }}
+
+      - name: Fetch the CLI under test
+        if: inputs.dist-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.dist-artifact }}
+          path: ${{ runner.temp }}/safegrd-dist
+
+      - name: Install it instead of the published release
+        if: inputs.dist-artifact != ''
+        run: echo "SAFEGRD_DOWNLOAD_BASE=file://$RUNNER_TEMP/safegrd-dist" >>"$GITHUB_ENV"
 
       - name: Seed a database to back up
         run: |
@@ -181,7 +248,7 @@ jobs:
       - name: Set up a standalone host
         id: host
         env:
-          SAFEGRD_VERSION: latest
+          SAFEGRD_VERSION: ${{ inputs.cli-version || 'latest' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           ./scripts/install-safegrd.sh
@@ -197,6 +264,7 @@ jobs:
       - name: Back up and drill into a sandbox
         uses: ./
         with:
+          version: ${{ inputs.cli-version || 'latest' }}
           config: ${{ steps.host.outputs.config }}
           database-url: mongodb://127.0.0.1:27017/app
           drill: true
@@ -211,7 +279,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      # Called from another repository, a checkout defaults to the caller's.
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.cli-version != '' && 'safegrd/backup-action' || github.repository }}
+          ref: ${{ inputs.cli-version != '' && inputs.action-ref || '' }}
+
+      - name: Fetch the CLI under test
+        if: inputs.dist-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.dist-artifact }}
+          path: ${{ runner.temp }}/safegrd-dist
+
+      - name: Install it instead of the published release
+        if: inputs.dist-artifact != ''
+        run: echo "SAFEGRD_DOWNLOAD_BASE=file://$RUNNER_TEMP/safegrd-dist" >>"$GITHUB_ENV"
 
       - name: Make a folder to back up
         run: |
@@ -222,7 +305,7 @@ jobs:
       - name: Set up a standalone host with a files surface
         id: host
         env:
-          SAFEGRD_VERSION: latest
+          SAFEGRD_VERSION: ${{ inputs.cli-version || 'latest' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           ./scripts/install-safegrd.sh
@@ -246,6 +329,7 @@ jobs:
         id: files
         uses: ./
         with:
+          version: ${{ inputs.cli-version || 'latest' }}
           config: ${{ steps.host.outputs.config }}
           surface: site
           drill: true
