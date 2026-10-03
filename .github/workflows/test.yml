@@ -1,0 +1,101 @@
+name: Test
+
+# Runs the action from this checkout against a real Postgres, with a host set
+# up by `safegrd init`: local storage and no remote server, so it needs no
+# account and no secrets. It backs up, drills into a sandbox database the
+# action creates, then drills again in memory with the key passed as an input.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 24
+    env:
+      ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      APP_URL: postgres://postgres:postgres@localhost:5432/app?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Seed a database to back up
+        run: |
+          psql "$ADMIN_URL" -c "CREATE DATABASE app"
+          psql "$APP_URL" -c "CREATE TABLE orders (id serial PRIMARY KEY, total bigint NOT NULL)" \
+            -c "INSERT INTO orders (total) SELECT g FROM generate_series(1, 250) g"
+
+      - name: Set up a standalone host
+        id: host
+        env:
+          SAFEGRD_VERSION: latest
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install-safegrd.sh
+          export PATH="$RUNNER_TEMP/safegrd-bin:$PATH"
+          dir="$RUNNER_TEMP/host"
+          safegrd init --config "$dir/safegrd.yaml" --storage local --local-path "$dir/storage" --node-name action-test
+          {
+            echo "config<<SAFEGRD_EOF"
+            cat "$dir/safegrd.yaml"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Back up and drill into a sandbox
+        id: sandbox
+        uses: ./
+        with:
+          config: ${{ steps.host.outputs.config }}
+          database-url: ${{ env.APP_URL }}
+          drill: true
+          sandbox-url: postgres://postgres:postgres@localhost:5432/drill?sslmode=disable
+
+      - name: Check the sandbox holds the rows
+        run: |
+          rows="$(psql "postgres://postgres:postgres@localhost:5432/drill?sslmode=disable" -tAc "SELECT count(*) FROM orders")"
+          test "$rows" = "250" || { echo "::error::The sandbox holds $rows rows, not 250."; exit 1; }
+
+      - name: Move the key out of the config's reach
+        id: key
+        run: |
+          dir="$RUNNER_TEMP/host"
+          # The log lists a step's inputs, so the key is masked first.
+          echo "::add-mask::$(grep '^AGE-SECRET-KEY-' "$dir/keys/daemon.key")"
+          {
+            echo "identity<<SAFEGRD_EOF"
+            cat "$dir/keys/daemon.key"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+          rm "$dir/keys/daemon.key"
+
+      - name: Back up and drill in memory, with the key as an input
+        id: memory
+        uses: ./
+        with:
+          config: ${{ steps.host.outputs.config }}
+          database-url: ${{ env.APP_URL }}
+          drill: true
+          private-key: ${{ steps.key.outputs.identity }}
+          postgres-version: none
+
+      - name: Check each run took its own snapshot
+        env:
+          FIRST: ${{ steps.sandbox.outputs.snapshot-id }}
+          SECOND: ${{ steps.memory.outputs.snapshot-id }}
+        run: |
+          test -n "$FIRST" && test -n "$SECOND" && test "$FIRST" != "$SECOND" ||
+            { echo "::error::snapshot-id was '$FIRST' then '$SECOND'."; exit 1; }
