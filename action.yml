@@ -1,0 +1,91 @@
+name: SafeGrd Backup
+description: Back up a database with SafeGrd, encrypted on the runner, and restore it to test it.
+author: SafeGrd
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  config:
+    description: >-
+      The host's SafeGrd config file, as written by `safegrd enroll --config`. Pass it from a
+      secret.
+    required: true
+  database-url:
+    description: >-
+      Connection string of the database to back up. Pass it from a secret. Leave it empty to use
+      the config's `database_url`.
+    required: false
+    default: ""
+  drill:
+    description: >-
+      `true` to restore the new backup after taking it and check every table's row count. The
+      result is reported to the remote server.
+    required: false
+    default: "false"
+  sandbox-url:
+    description: >-
+      With `drill: true`, an empty PostgreSQL database to restore into. A database named in the
+      URL that does not exist yet is created. Without it, the drill restores in memory.
+    required: false
+    default: ""
+  private-key:
+    description: >-
+      The Age identity that decrypts the backups, for a key you hold. Only the drill uses it.
+      Leave it empty when SafeGrd holds the key.
+    required: false
+    default: ""
+  postgres-version:
+    description: >-
+      Major version of the PostgreSQL server you back up. pg_dump must be this version or
+      newer, and is installed from apt.postgresql.org when the runner has no such pg_dump.
+      `none` uses whatever the runner has.
+    required: false
+    default: "17"
+  version:
+    description: SafeGrd CLI release to install, such as `v0.0.4`. `latest` is the newest release.
+    required: false
+    default: latest
+
+outputs:
+  snapshot-id:
+    description: The ID of the snapshot this run took.
+    value: ${{ steps.backup.outputs.snapshot-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install the PostgreSQL client
+      shell: bash
+      env:
+        POSTGRES_VERSION: ${{ inputs.postgres-version }}
+      run: '"$GITHUB_ACTION_PATH/scripts/install-postgres-client.sh"'
+
+    - name: Install SafeGrd
+      shell: bash
+      env:
+        SAFEGRD_VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+      run: '"$GITHUB_ACTION_PATH/scripts/install-safegrd.sh"'
+
+    - name: Write the SafeGrd config
+      shell: bash
+      env:
+        SAFEGRD_CONFIG_BODY: ${{ inputs.config }}
+      run: '"$GITHUB_ACTION_PATH/scripts/write-config.sh"'
+
+    - name: Back up
+      id: backup
+      shell: bash
+      env:
+        SAFEGRD_DATABASE_URL: ${{ inputs.database-url }}
+      run: '"$GITHUB_ACTION_PATH/scripts/backup.sh"'
+
+    - name: Drill
+      shell: bash
+      env:
+        DRILL: ${{ inputs.drill }}
+        SANDBOX_URL: ${{ inputs.sandbox-url }}
+        SNAPSHOT_ID: ${{ steps.backup.outputs.snapshot-id }}
+        SAFEGRD_PRIVATE_KEY: ${{ inputs.private-key }}
+      run: '"$GITHUB_ACTION_PATH/scripts/drill.sh"'
