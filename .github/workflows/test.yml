@@ -92,6 +92,16 @@ jobs:
             cat "$dir/safegrd.yaml"
             echo "SAFEGRD_EOF"
           } >>"$GITHUB_OUTPUT"
+          # The config goes in as a secret would, and names its key relative
+          # to itself, so the key goes in as the private-key input, as a
+          # workflow holding its own key passes it. Masked first: the log
+          # lists a step's inputs.
+          echo "::add-mask::$(grep '^AGE-SECRET-KEY-' "$dir/keys/daemon.key")"
+          {
+            echo "identity<<SAFEGRD_EOF"
+            cat "$dir/keys/daemon.key"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
 
       - name: Back up and drill into a sandbox
         id: sandbox
@@ -101,6 +111,7 @@ jobs:
           config: ${{ steps.host.outputs.config }}
           database-url: ${{ env.APP_URL }}
           drill: true
+          private-key: ${{ steps.host.outputs.identity }}
           sandbox-url: postgres://postgres:postgres@localhost:5432/drill?sslmode=disable
 
       - name: Check the sandbox holds the rows
@@ -196,6 +207,16 @@ jobs:
             cat "$dir/safegrd.yaml"
             echo "SAFEGRD_EOF"
           } >>"$GITHUB_OUTPUT"
+          # The config goes in as a secret would, and names its key relative
+          # to itself, so the key goes in as the private-key input, as a
+          # workflow holding its own key passes it. Masked first: the log
+          # lists a step's inputs.
+          echo "::add-mask::$(grep '^AGE-SECRET-KEY-' "$dir/keys/daemon.key")"
+          {
+            echo "identity<<SAFEGRD_EOF"
+            cat "$dir/keys/daemon.key"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
 
       - name: Back up and drill into a sandbox
         uses: ./
@@ -204,6 +225,7 @@ jobs:
           config: ${{ steps.host.outputs.config }}
           database-url: mysql://root:mysql@127.0.0.1:3306/app
           drill: true
+          private-key: ${{ steps.host.outputs.identity }}
           sandbox-url: mysql://root:mysql@127.0.0.1:3306/drill
 
       - name: Check the sandbox holds the rows
@@ -260,6 +282,16 @@ jobs:
             cat "$dir/safegrd.yaml"
             echo "SAFEGRD_EOF"
           } >>"$GITHUB_OUTPUT"
+          # The config goes in as a secret would, and names its key relative
+          # to itself, so the key goes in as the private-key input, as a
+          # workflow holding its own key passes it. Masked first: the log
+          # lists a step's inputs.
+          echo "::add-mask::$(grep '^AGE-SECRET-KEY-' "$dir/keys/daemon.key")"
+          {
+            echo "identity<<SAFEGRD_EOF"
+            cat "$dir/keys/daemon.key"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
 
       - name: Back up and drill into a sandbox
         uses: ./
@@ -268,6 +300,7 @@ jobs:
           config: ${{ steps.host.outputs.config }}
           database-url: mongodb://127.0.0.1:27017/app
           drill: true
+          private-key: ${{ steps.host.outputs.identity }}
           sandbox-url: mongodb://127.0.0.1:27017/drill
 
       - name: Check the sandbox holds the documents
@@ -324,6 +357,16 @@ jobs:
             cat "$dir/safegrd.yaml"
             echo "SAFEGRD_EOF"
           } >>"$GITHUB_OUTPUT"
+          # The config goes in as a secret would, and names its key relative
+          # to itself, so the key goes in as the private-key input, as a
+          # workflow holding its own key passes it. Masked first: the log
+          # lists a step's inputs.
+          echo "::add-mask::$(grep '^AGE-SECRET-KEY-' "$dir/keys/daemon.key")"
+          {
+            echo "identity<<SAFEGRD_EOF"
+            cat "$dir/keys/daemon.key"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
 
       - name: Back up the folder and drill it
         id: files
@@ -333,6 +376,7 @@ jobs:
           config: ${{ steps.host.outputs.config }}
           surface: site
           drill: true
+          private-key: ${{ steps.host.outputs.identity }}
 
       - name: Check the run took a snapshot
         env:
