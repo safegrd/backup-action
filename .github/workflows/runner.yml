@@ -1,0 +1,199 @@
+name: Runner
+
+# What only a GitHub-hosted runner shows, beyond what test.yml covers: the
+# MySQL and MariaDB client install on a runner that has neither, and a
+# workflow step's env reaching the action's own steps (a mailbox password and
+# the CA its server's certificate chains to). Standalone hosts, as in
+# test.yml, so no account and no secrets.
+#
+# Not part of the CLI's release gate (test.yml is): these pull GreenMail from
+# Docker Hub and install packages from the runner's apt sources, and neither
+# should be able to hold up a CLI release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mysql-client:
+    name: ${{ matrix.engine }} client from apt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: mysql
+            image: mysql:8.4
+            health: mysqladmin ping -h 127.0.0.1 -pmysql
+            package: mysql-client
+          - engine: mariadb
+            image: mariadb:11.4
+            health: healthcheck.sh --connect
+            package: mariadb-client
+    services:
+      db:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: mysql
+          MARIADB_ROOT_PASSWORD: mysql
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "${{ matrix.health }}" --health-interval 5s
+          --health-timeout 5s --health-retries 24
+    env:
+      MYSQL_PWD: mysql
+    steps:
+      - uses: actions/checkout@v4
+
+      # With the runner's own client, before it is removed.
+      - name: Seed a database to back up
+        run: |
+          mysql -h 127.0.0.1 -u root -e "CREATE DATABASE app"
+          mysql -h 127.0.0.1 -u root app -e "
+            CREATE TABLE orders (id INT AUTO_INCREMENT PRIMARY KEY, total BIGINT NOT NULL);
+            INSERT INTO orders (total)
+              WITH RECURSIVE g (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM g WHERE n < 250) SELECT n FROM g;"
+
+      # The image ships MySQL 8.0's client and server, so the install step
+      # would find them and skip apt. Removed here so it runs.
+      - name: Remove the runner's MySQL client
+        run: |
+          sudo apt-get remove -y -qq --purge 'mysql-client*' 'mysql-server*' 'mariadb-client*' >/dev/null
+          for tool in mysqldump mariadb-dump mysql mariadb; do
+            if command -v "$tool"; then echo "::error::$tool is still on the runner."; exit 1; fi
+          done
+
+      - name: Set up a standalone host
+        id: host
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install-safegrd.sh
+          export PATH="$RUNNER_TEMP/safegrd-bin:$PATH"
+          dir="$RUNNER_TEMP/host"
+          safegrd init --config "$dir/safegrd.yaml" --storage local --local-path "$dir/storage" --node-name "action-${{ matrix.engine }}"
+          {
+            echo "config<<SAFEGRD_EOF"
+            cat "$dir/safegrd.yaml"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+          echo "::add-mask::$(grep '^AGE-SECRET-KEY-' "$dir/keys/daemon.key")"
+          {
+            echo "identity<<SAFEGRD_EOF"
+            cat "$dir/keys/daemon.key"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Back up and drill into a sandbox
+        uses: ./
+        with:
+          config: ${{ steps.host.outputs.config }}
+          database-url: ${{ matrix.engine }}://root:mysql@127.0.0.1:3306/app
+          drill: true
+          private-key: ${{ steps.host.outputs.identity }}
+          sandbox-url: ${{ matrix.engine }}://root:mysql@127.0.0.1:3306/drill
+
+      - name: Check the client came from apt and the sandbox holds the rows
+        run: |
+          dpkg -s "${{ matrix.package }}" >/dev/null 2>&1 ||
+            dpkg -s default-mysql-client >/dev/null 2>&1 ||
+            { echo "::error::Neither ${{ matrix.package }} nor default-mysql-client is installed."; exit 1; }
+          client="$(command -v mariadb || command -v mysql)"
+          rows="$("$client" -h 127.0.0.1 -u root -N -B drill -e "SELECT COUNT(*) FROM orders")"
+          test "$rows" = "250" || { echo "::error::The sandbox holds $rows rows, not 250."; exit 1; }
+
+  mailbox:
+    name: mailbox password from the step's env
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # A CA made for the run, and GreenMail serving IMAPS with a certificate
+      # it signed, as a company's own mail server would.
+      - name: Start an IMAP server with three messages
+        run: |
+          certs="$RUNNER_TEMP/imap-certs"
+          mkdir -p "$certs" && cd "$certs"
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
+            -subj "/CN=SafeGrd test CA" -keyout ca.key -out ca.pem
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+            -subj "/CN=localhost" -keyout imap.key -out imap.csr
+          printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' >ext.cnf
+          openssl x509 -req -in imap.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 2 \
+            -extfile ext.cnf -out imap.pem
+          openssl pkcs12 -export -inkey imap.key -in imap.pem -certfile ca.pem -name greenmail \
+            -passout pass:changeit -out imap.p12
+          chmod 644 imap.p12
+          docker run -d --name imap -p 3993:3993 -p 3025:3025 -v "$certs:/certs:ro" \
+            -e GREENMAIL_OPTS="-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=support:$IMAP_PASSWORD@safegrd.test -Dgreenmail.users.login=email -Dgreenmail.tls.keystore.file=/certs/imap.p12 -Dgreenmail.tls.keystore.password=changeit" \
+            greenmail/standalone:2.1.2
+          for i in $(seq 1 30); do nc -z 127.0.0.1 3025 && nc -z 127.0.0.1 3993 && break; sleep 2; done
+          for i in 1 2 3; do
+            printf 'From: Alice <alice@safegrd.test>\r\nTo: support@safegrd.test\r\nSubject: Order %s\r\nMessage-ID: <order-%s@safegrd.test>\r\nDate: Mon, 05 Oct 2026 10:0%s:00 +0000\r\n\r\nOrder %s.\r\n' "$i" "$i" "$i" "$i" >m.eml
+            curl -sS --url smtp://127.0.0.1:3025 --mail-from alice@safegrd.test --mail-rcpt support@safegrd.test --upload-file m.eml
+          done
+          echo "SAFEGRD_TEST_CA=$certs/ca.pem" >>"$GITHUB_ENV"
+        env:
+          IMAP_PASSWORD: imap-pw-runner
+
+      - name: Set up a standalone host with a mailbox surface
+        id: host
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install-safegrd.sh
+          export PATH="$RUNNER_TEMP/safegrd-bin:$PATH"
+          dir="$RUNNER_TEMP/host"
+          safegrd init --config "$dir/safegrd.yaml" --storage local --local-path "$dir/storage" --node-name action-mailbox
+          cat >>"$dir/safegrd.yaml" <<'EOF'
+          surfaces:
+            - id: support-inbox
+              type: email
+              host: localhost
+              port: 3993
+              username: support@safegrd.test
+              credential: {from: env, name: SUPPORT_IMAP_PASSWORD}
+          EOF
+          {
+            echo "config<<SAFEGRD_EOF"
+            cat "$dir/safegrd.yaml"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+          echo "::add-mask::$(grep '^AGE-SECRET-KEY-' "$dir/keys/daemon.key")"
+          {
+            echo "identity<<SAFEGRD_EOF"
+            cat "$dir/keys/daemon.key"
+            echo "SAFEGRD_EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      # The README's recipe: the password and the CA are set on the step's
+      # env, and nothing else passes them to the action.
+      - name: Back up the mailbox and drill it
+        id: mailbox
+        uses: ./
+        env:
+          SUPPORT_IMAP_PASSWORD: imap-pw-runner
+          SAFEGRD_EMAIL_CA_FILE: ${{ env.SAFEGRD_TEST_CA }}
+        with:
+          config: ${{ steps.host.outputs.config }}
+          surface: support-inbox
+          drill: true
+          private-key: ${{ steps.host.outputs.identity }}
+
+      - name: Check the run took a snapshot of three messages
+        env:
+          SNAPSHOT: ${{ steps.mailbox.outputs.snapshot-id }}
+        run: |
+          test -n "$SNAPSHOT" || { echo "::error::snapshot-id is empty."; exit 1; }
+          meta="$RUNNER_TEMP/host/storage/support-inbox/$SNAPSHOT.meta.json"
+          test -f "$meta" || { echo "::error::No $meta."; exit 1; }
+          emails="$(jq -r '.email_stats.total_emails' "$meta")"
+          test "$emails" = "3" || { echo "::error::The snapshot holds $emails messages, not 3."; exit 1; }
