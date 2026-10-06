@@ -65,7 +65,8 @@ jobs:
       # would find them and skip apt. Removed here so it runs.
       - name: Remove the runner's MySQL client
         run: |
-          sudo apt-get remove -y -qq --purge 'mysql-client*' 'mysql-server*' 'mariadb-client*' >/dev/null
+          installed="$(dpkg-query -W -f '${Package}\n' 'mysql-*' 'mariadb-*' 2>/dev/null || true)"
+          if [ -n "$installed" ]; then sudo apt-get remove -y -qq --purge $installed >/dev/null; fi
           for tool in mysqldump mariadb-dump mysql mariadb; do
             if command -v "$tool"; then echo "::error::$tool is still on the runner."; exit 1; fi
           done
