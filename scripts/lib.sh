@@ -90,6 +90,16 @@ surface_field() {
 # is empty when this step cannot tell.
 check_inputs() {
   ENGINE=""
+  # With neither input, the config's one surface is this run's: a database in
+  # the config is a surface, and naming it keeps one history for it.
+  if [ -z "${SURFACE:-}" ] && [ -z "${SAFEGRD_DATABASE_URL:-}" ]; then
+    read_surfaces
+    case "$(jq '.surfaces | length' "$SAFEGRD_DIR/surfaces.json")" in
+      1) SURFACE="$(jq -r '.surfaces[0].id' "$SAFEGRD_DIR/surfaces.json")" ;;
+      0) fail "Set database-url, or give the config a surface to back up." ;;
+      *) fail "The config has several surfaces ($(jq -r '[.surfaces[].id] | join(", ")' "$SAFEGRD_DIR/surfaces.json")). Name one with the surface input." ;;
+    esac
+  fi
   if [ -n "${SURFACE:-}" ]; then
     if [ -n "${SAFEGRD_DATABASE_URL:-}" ]; then
       fail "Set database-url or surface, not both. surface backs up what the config defines for that surface."
