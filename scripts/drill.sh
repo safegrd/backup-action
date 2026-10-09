@@ -23,7 +23,7 @@ fi
 
 if [ -z "${SANDBOX_URL:-}" ]; then
   echo "Restoring $SNAPSHOT_ID in memory."
-  if ! run_safegrd - verify --snapshot "$SNAPSHOT_ID" --dry-run; then
+  if ! run_safegrd - verify --snapshot "$SNAPSHOT_ID" --in-memory; then
     fail "The drill of $SNAPSHOT_ID failed. The lines above say which check failed."
   fi
 else
