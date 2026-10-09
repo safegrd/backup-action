@@ -84,24 +84,10 @@ surface_field() {
   jq -r --arg id "$1" --arg f "$2" '.surfaces[] | select(.id == $id) | .[$f] // empty' "$SAFEGRD_DIR/surfaces.json"
 }
 
-# config_database_url prints the config's database_url, following an env: or
-# file: reference the way the CLI does. It prints nothing when there is none.
-config_database_url() {
-  local v
-  v="$(sed -n 's/^database_url:[[:space:]]*//p' "$SAFEGRD_CONFIG_FILE" | head -n 1 |
-    sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
-  case "$v" in
-    env:*) v="$(printenv "${v#env:}" || true)" ;;
-    file:*) v="$(head -n 1 "${v#file:}" 2>/dev/null || true)" ;;
-  esac
-  printf '%s' "$v"
-}
-
 # check_inputs refuses inputs that cannot work together, before anything is
 # backed up, and sets ENGINE to what this run backs up: postgres, mysql,
 # mongodb or sqlite for a database, files or email for such a surface. ENGINE
-# is empty when the config's database_url is a reference this step cannot
-# read.
+# is empty when this step cannot tell.
 check_inputs() {
   ENGINE=""
   if [ -n "${SURFACE:-}" ]; then
@@ -114,8 +100,9 @@ check_inputs() {
       fail "The config has no surface $SURFACE. It has: $(jq -r '[.surfaces[].id] | join(", ")' "$SAFEGRD_DIR/surfaces.json")."
     fi
   else
+    # A database in the config is a surface, named with the surface input;
+    # without one, this run backs up the database-url input.
     local url="${SAFEGRD_DATABASE_URL:-}"
-    [ -n "$url" ] || url="$(config_database_url)"
     [ -z "$url" ] || ENGINE="$(engine_of_url "$url")"
   fi
 

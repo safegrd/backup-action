@@ -15,7 +15,7 @@ inputs:
     description: >-
       Connection string of the database to back up: `postgres://`, `mysql://` or `mariadb://`,
       `mongodb://` or `mongodb+srv://`, or `sqlite:` with a path. Pass it from a secret. Leave it
-      empty to use the config's `database_url`, or when `surface` is set.
+      empty when `surface` is set, or when the config has one surface, which is then backed up.
     required: false
     default: ""
   surface:
