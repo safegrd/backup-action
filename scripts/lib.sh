@@ -119,7 +119,7 @@ check_inputs() {
   if sandbox_drill && [ -n "$ENGINE" ]; then
     case "$ENGINE" in
       files | email)
-        fail "Surface $SURFACE is a $ENGINE surface. Its drill restores in memory and takes no sandbox, so leave out sandbox-url."
+        fail "Surface $SURFACE ($ENGINE) drills in memory and takes no sandbox, so leave out sandbox-url."
         ;;
     esac
     local sandbox

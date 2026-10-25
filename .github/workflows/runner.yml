@@ -50,7 +50,7 @@ jobs:
     env:
       MYSQL_PWD: mysql
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # With the runner's own client, before it is removed.
       - name: Seed a database to back up
@@ -115,7 +115,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # A CA made for the run, and GreenMail serving IMAPS with a certificate
       # it signed, as a company's own mail server would.
@@ -136,7 +136,19 @@ jobs:
           docker run -d --name imap -p 3993:3993 -p 3025:3025 -v "$certs:/certs:ro" \
             -e GREENMAIL_OPTS="-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=support:$IMAP_PASSWORD@safegrd.test -Dgreenmail.users.login=email -Dgreenmail.tls.keystore.file=/certs/imap.p12 -Dgreenmail.tls.keystore.password=changeit" \
             greenmail/standalone:2.1.2
-          for i in $(seq 1 30); do nc -z 127.0.0.1 3025 && nc -z 127.0.0.1 3993 && break; sleep 2; done
+          # Docker's proxy accepts on the published port before GreenMail
+          # listens, so an open port proves nothing. Wait for its SMTP
+          # greeting; IMAPS starts in the same pass.
+          ready=""
+          for i in $(seq 1 60); do
+            if banner="$(timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/3025 && head -n 1 <&3' 2>/dev/null)" &&
+              [ "${banner#220}" != "$banner" ]; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          [ -n "$ready" ] || { docker logs imap; echo "::error::GreenMail sent no SMTP greeting within 60 seconds."; exit 1; }
           for i in 1 2 3; do
             printf 'From: Alice <alice@safegrd.test>\r\nTo: support@safegrd.test\r\nSubject: Order %s\r\nMessage-ID: <order-%s@safegrd.test>\r\nDate: Mon, 05 Oct 2026 10:0%s:00 +0000\r\n\r\nOrder %s.\r\n' "$i" "$i" "$i" "$i" >m.eml
             curl -sS --url smtp://127.0.0.1:3025 --mail-from alice@safegrd.test --mail-rcpt support@safegrd.test --upload-file m.eml

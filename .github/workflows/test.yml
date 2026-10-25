@@ -55,7 +55,7 @@ jobs:
       APP_URL: postgres://postgres:postgres@localhost:5432/app?sslmode=disable
     steps:
       # Called from another repository, a checkout defaults to the caller's.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ inputs.cli-version != '' && 'safegrd/backup-action' || github.repository }}
           ref: ${{ inputs.cli-version != '' && inputs.action-ref || '' }}
@@ -168,7 +168,7 @@ jobs:
       MYSQL_PWD: mysql
     steps:
       # Called from another repository, a checkout defaults to the caller's.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ inputs.cli-version != '' && 'safegrd/backup-action' || github.repository }}
           ref: ${{ inputs.cli-version != '' && inputs.action-ref || '' }}
@@ -250,7 +250,7 @@ jobs:
           --health-timeout 5s --health-retries 24
     steps:
       # Called from another repository, a checkout defaults to the caller's.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ inputs.cli-version != '' && 'safegrd/backup-action' || github.repository }}
           ref: ${{ inputs.cli-version != '' && inputs.action-ref || '' }}
@@ -317,7 +317,7 @@ jobs:
     timeout-minutes: 20
     steps:
       # Called from another repository, a checkout defaults to the caller's.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ inputs.cli-version != '' && 'safegrd/backup-action' || github.repository }}
           ref: ${{ inputs.cli-version != '' && inputs.action-ref || '' }}
