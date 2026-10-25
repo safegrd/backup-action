@@ -59,6 +59,11 @@ engine_of_url() {
   esac
 }
 
+# article is "an" before a surface type that starts with a vowel, else "a".
+article() {
+  case "$1" in [aeiouAEIOU]*) echo an ;; *) echo a ;; esac
+}
+
 # engine_name is an engine as the log names it.
 engine_name() {
   case "$1" in
@@ -120,7 +125,7 @@ check_inputs() {
   if sandbox_drill && [ -n "$ENGINE" ]; then
     case "$ENGINE" in
       files | email)
-        fail "Surface $SURFACE ($ENGINE) drills in memory and takes no sandbox, so leave out sandbox-url."
+        fail "Surface $SURFACE is $(article "$ENGINE") $ENGINE surface. Its drill restores in memory and takes no sandbox, so leave out sandbox-url."
         ;;
     esac
     local sandbox
