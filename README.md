@@ -23,9 +23,14 @@ another managed database: the runner is the host.
    in the SafeGrd console under **Tokens**, then in an empty folder:
 
    ```sh
-   safegrd enroll --config ./safegrd.yaml --token sg_pat_... --node-name ci-prod \
+   read -rs SAFEGRD_TOKEN && export SAFEGRD_TOKEN   # paste the token; it is not shown
+   safegrd enroll --config ./safegrd.yaml --token env:SAFEGRD_TOKEN --node-name ci-prod \
      --storage hosted --key-custody safegrd
    ```
+
+   `env:SAFEGRD_TOKEN` keeps the token out of `ps` and your shell history. The
+   token only registers the host: revoke it afterwards, and the host keeps
+   backing up with a token of its own.
 
    This writes `safegrd.yaml`, which holds the host's token and the public key,
    and the key itself to `keys/daemon.key`. The private key is never written to
@@ -102,7 +107,7 @@ jobs:
           postgres-version: "17"
           drill: true
           sandbox-url: postgres://postgres:sandbox@localhost:5432/drill?sslmode=disable
-          # Only with a key you hold:
+          # Only with a customer-managed key:
           # private-key: ${{ secrets.SAFEGRD_PRIVATE_KEY }}
 ```
 
@@ -231,8 +236,9 @@ surfaces:
 With `from: safegrd`, SafeGrd holds the mailbox's password, encrypted, and
 gives it only to this host when it backs up. The workflow needs no secret for
 it. The first run registers the surface with SafeGrd and fails, because
-SafeGrd holds no password for it yet. Hand the password over in the console
-under **Nodes**, **Credential**, and the next run backs the mailbox up.
+SafeGrd holds no password for it yet. In the console, open the surface under
+**Surfaces**, click **Edit**, then **Add credential**. The next run backs the
+mailbox up.
 
 To keep the password in GitHub instead, name a variable in the config and set
 it on the step:
@@ -267,7 +273,7 @@ refuses it before backing up.
 | `surface` | none | ID of a surface in the config to back up instead: a folder, a mailbox or a database. |
 | `drill` | `false` | `true` restores the new backup and checks it. |
 | `sandbox-url` | none | With `drill: true`, an empty database of the same engine to restore into. Without it, the drill restores in memory. |
-| `private-key` | none | The Age identity, for a key you hold. Only the drill uses it. |
+| `private-key` | none | With a customer-managed key, the Age identity that decrypts the backups. Only the drill uses it. |
 | `postgres-version` | `18` | For PostgreSQL, the major version of the server; `pg_dump` 18 reads 9.2 to 18. `none` uses the runner's own client. |
 | `version` | `latest` | SafeGrd CLI release to install, such as `v0.0.4`. |
 

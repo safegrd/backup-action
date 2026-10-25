@@ -41,8 +41,8 @@ inputs:
     default: ""
   private-key:
     description: >-
-      The Age identity that decrypts the backups, for a key you hold. Only the drill uses it.
-      Leave it empty when SafeGrd holds the key.
+      With a customer-managed key, the Age identity that decrypts the backups. Only the drill
+      uses it. Leave it empty with a SafeGrd-managed key.
     required: false
     default: ""
   postgres-version:
