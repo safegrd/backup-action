@@ -250,6 +250,9 @@ it on the step:
           surface: support-inbox
 ```
 
+A WordPress site or a Laravel app is not backed up from a runner: the
+SafeGrd plugin or package backs it up on the host that serves it.
+
 A folder or a mailbox has no sandbox. With `drill: true`, its drill reads the
 whole snapshot back on the runner and checks every file or message against
 the manifest written at backup time. Leave out `sandbox-url`; the action
@@ -265,7 +268,7 @@ refuses it before backing up.
 | `drill` | `false` | `true` restores the new backup and checks it. |
 | `sandbox-url` | none | With `drill: true`, an empty database of the same engine to restore into. Without it, the drill restores in memory. |
 | `private-key` | none | The Age identity, for a key you hold. Only the drill uses it. |
-| `postgres-version` | `17` | For PostgreSQL, the major version of the server. `none` uses the runner's own client. |
+| `postgres-version` | `18` | For PostgreSQL, the major version of the server; `pg_dump` 18 reads 9.2 to 18. `none` uses the runner's own client. |
 | `version` | `latest` | SafeGrd CLI release to install, such as `v0.0.4`. |
 
 ## Outputs

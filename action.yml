@@ -49,9 +49,10 @@ inputs:
     description: >-
       For a PostgreSQL database, the major version of the server. pg_dump must be this version
       or newer, and is installed from apt.postgresql.org when the runner has no such pg_dump.
-      `none` uses whatever the runner has. Other engines ignore it.
+      The default, 18, reads PostgreSQL 9.2 to 18. `none` uses whatever the runner has. Other
+      engines ignore it.
     required: false
-    default: "17"
+    default: "18"
   version:
     description: SafeGrd CLI release to install, such as `v0.0.4`. `latest` is the newest release.
     required: false

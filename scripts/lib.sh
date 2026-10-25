@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared by the action's steps. Sourced, never run.
 #
 # The scripts run under bash 3.2 as well (macOS), so: no associative arrays,

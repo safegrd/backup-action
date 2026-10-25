@@ -17,5 +17,6 @@ case "$ENGINE" in
   mongodb) exec "$(dirname "$0")/install-mongodb-tools.sh" ;;
   sqlite) echo "SQLite needs no client: SafeGrd reads the database file itself." ;;
   files | email) echo "Surface $SURFACE ($ENGINE) needs no database client." ;;
+  wordpress | laravel) fail "Surface $SURFACE is a $ENGINE surface. The SafeGrd plugin or package backs it up on the host that serves the site, not from a runner." ;;
   *) fail "Surface $SURFACE has type '$ENGINE', which this action does not back up." ;;
 esac
